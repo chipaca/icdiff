@@ -1,0 +1,89 @@
+name: icdiff
+base: core18
+version: '1.9.4-1'
+summary: terminal side-by-side colorized word diff
+license: Python-2.0
+description: >-
+  Your terminal can display color, but most diff tools don't make good
+  use of it. By highlighting changes, icdiff can show you the
+  differences between similar files without getting in the way. This
+  is especially helpful for identifying and understanding small
+  changes within existing lines.
+
+  Instead of trying to be a diff replacement for all circumstances,
+  the goal of icdiff is to be a tool you can reach for to get a better
+  picture of what changed when it's not immediately obvious from diff.
+
+# personal-files won't auto-connect without going through the "Process for
+# aliases, auto-connetions and tracks", https://docs.snapcraft.io/455
+# During testing, "snap connect icdiff:gitconfig" should work
+plugs:
+  gitconfig:
+    interface: personal-files
+    read:
+      - $HOME/.gitconfig         # the old location
+      - $HOME/.config/git/config # the new location (people could change it via XDG_CONFIG_HOME and that isn't supported by snapd yet)
+
+apps:
+  icdiff:
+    command: usr/bin/icdiff
+    plugs:
+      - home            # so it can acess files under the user's home
+      - removable-media # so it can access things in /media, etc
+    adapter: none       # just call straight into command (no wrapper nor chain needed)
+  git-icdiff:
+    # We'll want to request an automatic alias for this to work seamlessly.
+    # During testing, "snap alias icdiff.git-icdiff git-icdiff" should work
+    command: usr/bin/git-icdiff
+    environment:
+      # there's perl somewhere in the pipeline, and it gets shouty without this
+      # (this is _not_ just for the call to perl we're adding to unset HOME)
+      LC_ALL: C.UTF-8
+    plugs:
+      - home            # so it can acess files under the user's home
+      - removable-media # so it can access things in /media, etc
+      - gitconfig       # so it can access ~/.gitconfig :-)
+    adapter: full       # use the new-style explicit command-chain (avoids a wrapper, and is nicer to debug)
+
+grade: stable
+confinement: strict
+
+parts:
+  ppa:
+    plugin: nil
+    override-pull: |
+      # this adds the git-core ppa, so we always get the latest stable git
+      # See more here: https://launchpad.net/~git-core/+archive/ubuntu/ppa
+      apt --quiet -o Dpkg::Progress-Fancy=false install -y software-properties-common
+      add-apt-repository -y ppa:git-core
+      apt --quiet -o Dpkg::Progress-Fancy=false update
+  icdiff:
+    plugin: dump
+    after: [ppa]
+    source: .
+    override-build: |
+      # core18 doesn't have 'python', rewrite shebang to use python3 (and make it a bit faster while we're at it)
+      sed -i '1s|^#!.*|#!/usr/bin/python3 -SIB|' icdiff
+      # snapd tries to be helpful by pointing $HOME elsewhere
+      sed -i '1s/.*/&\nexport HOME=\$(perl -we "print((getpwuid $>)[7])")/' git-icdiff
+      # now go on to do the usual build stuff
+      snapcraftctl build
+    stage-packages:
+      - git
+    organize:
+      # move things around so they're tidier
+      usr/lib/git-core/git-mergetool--lib: usr/bin/git-mergetool--lib
+      usr/lib/git-core/git-difftool--helper: usr/bin/git-difftool--helper
+      icdiff: usr/bin/icdiff
+      git-icdiff: usr/bin/git-icdiff
+    stage:
+      # only pull in the things we need. This is risky: there might be more
+      # needed, some corner case needing other libs or helpers; fix as those
+      # are found; the alternative is to ship everything which would make the
+      # snap unnecessarily huge.
+      - usr/bin/icdiff
+      - usr/bin/git-icdiff
+      - usr/bin/git
+      - usr/bin/git-mergetool--lib
+      - usr/bin/git-difftool--helper
+      - "**/libpcre2-8.so.0*"
