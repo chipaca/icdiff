@@ -1,6 +1,5 @@
 name: icdiff
 base: core18
-version: '1.9.4-1'
 summary: terminal side-by-side colorized word diff
 license: Python-2.0
 description: >-
@@ -14,8 +13,11 @@ description: >-
   the goal of icdiff is to be a tool you can reach for to get a better
   picture of what changed when it's not immediately obvious from diff.
 
+adopt-info: icdiff   # look for snapcraftctl set-* in the icdiff part
+
 # personal-files won't auto-connect without going through the "Process for
 # aliases, auto-connetions and tracks", https://docs.snapcraft.io/455
+# like so: https://forum.snapcraft.io/t/9703
 # During testing, "snap connect icdiff:gitconfig" should work
 plugs:
   gitconfig:
@@ -32,7 +34,8 @@ apps:
       - removable-media # so it can access things in /media, etc
     adapter: none       # just call straight into command (no wrapper nor chain needed)
   git-icdiff:
-    # We'll want to request an automatic alias for this to work seamlessly.
+    # If you're getting it from the store you'll have an automatic alias
+    # (because https://forum.snapcraft.io/t/9703)
     # During testing, "snap alias icdiff.git-icdiff git-icdiff" should work
     command: usr/bin/git-icdiff
     environment:
@@ -61,13 +64,15 @@ parts:
     plugin: dump
     after: [ppa]
     source: .
-    override-build: |
+    override-pull: |
+      # do the usual pull stuff
+      snapcraftctl pull
       # core18 doesn't have 'python', rewrite shebang to use python3 (and make it a bit faster while we're at it)
       sed -i '1s|^#!.*|#!/usr/bin/python3 -SIB|' icdiff
       # snapd tries to be helpful by pointing $HOME elsewhere
       sed -i '1s/.*/&\nexport HOME=\$(perl -we "print((getpwuid $>)[7])")/' git-icdiff
-      # now go on to do the usual build stuff
-      snapcraftctl build
+      # set the version from __version__
+      snapcraftctl set-version "$( /usr/bin/python3 -c 'import icdiff; print(icdiff.__version__)' )"
     stage-packages:
       - git
     organize:
@@ -87,3 +92,4 @@ parts:
       - usr/bin/git-mergetool--lib
       - usr/bin/git-difftool--helper
       - "**/libpcre2-8.so.0*"
+ 
