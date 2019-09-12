@@ -540,43 +540,46 @@ def create_option_parser():
                                for x in sorted(color_mapping.items())) + "'"
                       ".  You don't have to override all of them: "
                       "'--color-map=separator:white,description:cyan")
+    parser.add_option("--is-git-diff", default=False,
+                      action="store_true",
+                      help="Show the real file name when displaying "
+                      "git-diff result")
     return parser
 
 
 def set_cols_option(options):
-    if not options.cols:
-        if os.name == 'nt':
+    if os.name == 'nt':
+        try:
+            import struct
+            from ctypes import windll, create_string_buffer
+
+            fh = windll.kernel32.GetStdHandle(-12)  # stderr is -12
+            csbi = create_string_buffer(22)
+            windll.kernel32.GetConsoleScreenBufferInfo(fh, csbi)
+            res = struct.unpack("hhhhHhhhhhh", csbi.raw)
+            options.cols = res[7] - res[5] + 1  # right - left + 1
+            return;
+
+        except Exception:
+            pass
+
+    else:
+        def ioctl_GWINSZ(fd):
             try:
+                import fcntl
+                import termios
                 import struct
-                from ctypes import windll, create_string_buffer
-
-                fh = windll.kernel32.GetStdHandle(-12)  # stderr is -12
-                csbi = create_string_buffer(22)
-                windll.kernel32.GetConsoleScreenBufferInfo(fh, csbi)
-                res = struct.unpack("hhhhHhhhhhh", csbi.raw)
-                options.cols = res[7] - res[5] + 1  # right - left + 1
-
+                cr = struct.unpack('hh', fcntl.ioctl(fd,
+                                                     termios.TIOCGWINSZ,
+                                                     '1234'))
             except Exception:
                 return None
-
-        else:
-            def ioctl_GWINSZ(fd):
-                try:
-                    import fcntl
-                    import termios
-                    import struct
-                    cr = struct.unpack('hh', fcntl.ioctl(fd,
-                                                         termios.TIOCGWINSZ,
-                                                         '1234'))
-                except Exception:
-                    return None
-                return cr
-            cr = ioctl_GWINSZ(0) or ioctl_GWINSZ(1) or ioctl_GWINSZ(2)
-            if cr and cr[1] > 0:
-                options.cols = cr[1]
-            else:
-                options.cols = 80
-    return options
+            return cr
+        cr = ioctl_GWINSZ(0) or ioctl_GWINSZ(1) or ioctl_GWINSZ(2)
+        if cr and cr[1] > 0:
+            options.cols = cr[1]
+            return
+    options.cols = 80
 
 
 def validate_has_two_arguments(parser, args):
@@ -589,7 +592,8 @@ def start():
     parser = create_option_parser()
     options, args = parser.parse_args()
     validate_has_two_arguments(parser, args)
-    options = set_cols_option(options)
+    if not options.cols:
+        set_cols_option(options)
     diff(options, *args)
 
 
@@ -667,18 +671,26 @@ def format_label(path, label="{path}"):
 
 
 def diff_files(options, a, b):
-    if options.labels:
-        if len(options.labels) == 2:
-            headers = [
-                format_label(a, options.labels[0]),
-                format_label(b, options.labels[1]),
-            ]
-        else:
-            codec_print("error: to use arbitrary file labels, "
-                        "specify -L twice.", options)
-            return
+    if options.is_git_diff is True:
+        # Use $BASE as label when displaying git-diff result
+        base = os.getenv("BASE")
+        headers = [
+            format_label(a, base),
+            format_label(b, base)
+        ]
     else:
-        headers = a, b
+        if options.labels:
+            if len(options.labels) == 2:
+                headers = [
+                    format_label(a, options.labels[0]),
+                    format_label(b, options.labels[1]),
+                ]
+            else:
+                codec_print("error: to use arbitrary file labels, "
+                            "specify -L twice.", options)
+                return
+        else:
+            headers = a, b
     if options.no_headers:
         headers = None, None
 
